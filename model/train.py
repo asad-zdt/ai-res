@@ -45,7 +45,7 @@ def load_dataset(data_path: Path) -> pd.DataFrame:
 
 
 def build_pipeline() -> Pipeline:
-    """Create the shared preprocessing pipeline with a random forest model."""
+    """Create the shared preprocessing pipeline with a tuned random forest model."""
     preprocessing = ColumnTransformer(
         transformers=[
             (
@@ -61,7 +61,14 @@ def build_pipeline() -> Pipeline:
             ("preprocessor", preprocessing),
             (
                 "regressor",
-                RandomForestRegressor(n_estimators=300, random_state=42),
+                RandomForestRegressor(
+                    n_estimators=500,       # more trees → lower variance
+                    max_depth=15,           # prevents over-fitting on small datasets
+                    min_samples_leaf=2,     # smoother leaf estimates
+                    max_features="sqrt",    # standard best-practice for regression RF
+                    random_state=42,
+                    n_jobs=-1,              # use all CPU cores
+                ),
             ),
         ]
     )
@@ -73,7 +80,15 @@ def build_model_pipeline(model_name: str) -> Pipeline:
     if model_name == "rf":
         return pipeline
     if model_name == "gbr":
-        estimator = MultiOutputRegressor(GradientBoostingRegressor(random_state=42))
+        estimator = MultiOutputRegressor(
+            GradientBoostingRegressor(
+                n_estimators=300,       # more boosting rounds
+                learning_rate=0.05,     # smaller steps → less overfitting
+                max_depth=4,            # shallow trees work best for boosting
+                subsample=0.8,          # stochastic boosting for variance reduction
+                random_state=42,
+            )
+        )
         pipeline.set_params(regressor=estimator)
         return pipeline
     if model_name == "ridge":

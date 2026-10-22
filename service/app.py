@@ -9,7 +9,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from collector import launcher, monitor
-from collector.config_loader import load_apps
+from collector.config_loader import AppSpec
+from collector.user_apps import load_all_apps
 from config import resolve_path
 from errors import UnknownAppError
 from model.predict import predict as model_predict
@@ -43,6 +44,13 @@ def _active_predictor() -> str:
 
 app = FastAPI()
 _RUN_LOCK = threading.Lock()
+
+
+def load_apps() -> dict[str, AppSpec]:
+    """Load configured workloads and locally selected desktop applications."""
+    return load_all_apps()
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:8501"],
@@ -72,11 +80,18 @@ def predict(request: PredictRequest) -> PredictResponse:
             predicted = model_predict(request.app_name)
         else:
             predicted = mock_predict(request.app_name)
-    except UnknownAppError as error:
-        raise HTTPException(
-            status_code=503,
-            detail=f"No prediction profile available for configured app: {error.app_name}",
-        ) from error
+    except UnknownAppError:
+        # Model bundle exists but has no profile for this app yet (e.g. it was
+        # collected after the last train run). Fall back to the mock predictor
+        # so the GUI never shows a hard 503 for a configured app.
+        try:
+            predicted = mock_predict(request.app_name)
+            predictor = "mock"
+        except UnknownAppError as error:
+            raise HTTPException(
+                status_code=503,
+                detail=f"No prediction profile available for configured app: {error.app_name}",
+            ) from error
     return PredictResponse(
         app_name=request.app_name,
         predicted=predicted,
@@ -102,14 +117,19 @@ def run_and_compare(request: PredictRequest) -> RunAndCompareResponse:
                 predicted = model_predict(request.app_name)
             else:
                 predicted = mock_predict(request.app_name)
-        except UnknownAppError as error:
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "No prediction profile available for configured app: "
-                    f"{error.app_name}"
-                ),
-            ) from error
+        except UnknownAppError:
+            # Model has no profile for this app yet — fall back to mock.
+            try:
+                predicted = mock_predict(request.app_name)
+                predictor = "mock"
+            except UnknownAppError as error:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "No prediction profile available for configured app: "
+                        f"{error.app_name}"
+                    ),
+                ) from error
 
         decision = admission.decide(predicted)
         if not decision.admitted:

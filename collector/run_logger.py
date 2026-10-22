@@ -7,9 +7,10 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from collector.config_loader import AppSpec, load_apps
+from collector.config_loader import AppSpec
 from collector.launcher import LaunchedApp, cleanup, launch
 from collector.monitor import MonitorSamples, monitor_process, summarize
+from collector.user_apps import load_all_apps
 from config import resolve_path
 
 RUN_COLUMNS = [
@@ -212,7 +213,7 @@ def main() -> None:
         parser.error("--cooldown cannot be negative")
 
     try:
-        apps = load_apps()
+        apps = load_all_apps()
         selected = (
             [name.strip() for name in args.only.split(",") if name.strip()]
             if args.only

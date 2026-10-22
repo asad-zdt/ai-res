@@ -44,7 +44,7 @@ switch ($Task.ToLowerInvariant()) {
         Invoke-VenvPython @("-m", "uvicorn", "service.app:app", "--host", "127.0.0.1", "--port", "8000")
     }
     "gui" {
-        Invoke-VenvPython @("-m", "streamlit", "run", "gui/streamlit_app.py")
+        Invoke-VenvPython @("-m", "gui.tk_app")
     }
     "test" {
         Invoke-VenvPython @("-m", "pytest", "-q")
@@ -103,7 +103,7 @@ Tasks:
   train    Train the resource prediction model
   eval     Evaluate the model
   api      Start the API on 127.0.0.1:8000
-  gui      Start the Streamlit dashboard
+  gui      Start the Tkinter desktop dashboard
   test     Run pytest
   e2e      Run the end-to-end workflow
   clean    Remove generated caches and artifacts (confirmation required)

@@ -22,6 +22,24 @@ _HISTORY_COLUMNS = {
     "disk_mbps": "hist_avg_disk_mbps",
     "net_kbps": "hist_avg_net_kbps",
 }
+_HISTORY_STD_COLUMNS = {
+    "cpu_pct": "hist_std_cpu_pct",
+    "ram_mb": "hist_std_ram_mb",
+    "disk_mbps": "hist_std_disk_mbps",
+    "net_kbps": "hist_std_net_kbps",
+}
+_HISTORY_MIN_COLUMNS = {
+    "cpu_pct": "hist_min_cpu_pct",
+    "ram_mb": "hist_min_ram_mb",
+    "disk_mbps": "hist_min_disk_mbps",
+    "net_kbps": "hist_min_net_kbps",
+}
+_HISTORY_MAX_COLUMNS = {
+    "cpu_pct": "hist_max_cpu_pct",
+    "ram_mb": "hist_max_ram_mb",
+    "disk_mbps": "hist_max_disk_mbps",
+    "net_kbps": "hist_max_net_kbps",
+}
 
 
 def prepare_datasets(
@@ -43,11 +61,33 @@ def prepare_datasets(
     ).reset_index(drop=True)
 
     # Shift each target before rolling so the current run never contributes to its own history.
-    histories = valid_runs.groupby("app_name", sort=False)[TARGET_COLUMNS].transform(
-        lambda values: values.shift(1).rolling(window=window, min_periods=1).mean()
-    )
+    # Use groupby().transform() for EVERY stat so rolling stays within each app's rows,
+    # not across the whole dataframe.
     for target, history_column in _HISTORY_COLUMNS.items():
-        valid_runs[history_column] = histories[target]
+        valid_runs[history_column] = valid_runs.groupby(
+            "app_name", sort=False
+        )[target].transform(
+            lambda values: values.shift(1).rolling(window=window, min_periods=1).mean()
+        )
+    for target, history_column in _HISTORY_STD_COLUMNS.items():
+        # std with min_periods=2 so single-value windows fill with 0 instead of NaN
+        valid_runs[history_column] = valid_runs.groupby(
+            "app_name", sort=False
+        )[target].transform(
+            lambda values: values.shift(1).rolling(window=window, min_periods=2).std().fillna(0.0)
+        )
+    for target, history_column in _HISTORY_MIN_COLUMNS.items():
+        valid_runs[history_column] = valid_runs.groupby(
+            "app_name", sort=False
+        )[target].transform(
+            lambda values: values.shift(1).rolling(window=window, min_periods=1).min()
+        )
+    for target, history_column in _HISTORY_MAX_COLUMNS.items():
+        valid_runs[history_column] = valid_runs.groupby(
+            "app_name", sort=False
+        )[target].transform(
+            lambda values: values.shift(1).rolling(window=window, min_periods=1).max()
+        )
 
     first_run_mask = valid_runs["hist_avg_cpu_pct"].isna()
     dropped_rows = int(first_run_mask.sum())
@@ -65,7 +105,22 @@ def prepare_datasets(
             _HISTORY_COLUMNS[target]: (target, "mean")
             for target in TARGET_COLUMNS
         },
+        **{
+            _HISTORY_STD_COLUMNS[target]: (target, "std")
+            for target in TARGET_COLUMNS
+        },
+        **{
+            _HISTORY_MIN_COLUMNS[target]: (target, "min")
+            for target in TARGET_COLUMNS
+        },
+        **{
+            _HISTORY_MAX_COLUMNS[target]: (target, "max")
+            for target in TARGET_COLUMNS
+        },
     )
+    # std of a single-row group is NaN; fill with 0
+    std_cols = list(_HISTORY_STD_COLUMNS.values())
+    profiles[std_cols] = profiles[std_cols].fillna(0.0)
     profiles = profiles.reset_index()[
         [
             "app_name",
@@ -75,6 +130,18 @@ def prepare_datasets(
             _HISTORY_COLUMNS["ram_mb"],
             _HISTORY_COLUMNS["disk_mbps"],
             _HISTORY_COLUMNS["net_kbps"],
+            _HISTORY_STD_COLUMNS["cpu_pct"],
+            _HISTORY_STD_COLUMNS["ram_mb"],
+            _HISTORY_STD_COLUMNS["disk_mbps"],
+            _HISTORY_STD_COLUMNS["net_kbps"],
+            _HISTORY_MIN_COLUMNS["cpu_pct"],
+            _HISTORY_MIN_COLUMNS["ram_mb"],
+            _HISTORY_MIN_COLUMNS["disk_mbps"],
+            _HISTORY_MIN_COLUMNS["net_kbps"],
+            _HISTORY_MAX_COLUMNS["cpu_pct"],
+            _HISTORY_MAX_COLUMNS["ram_mb"],
+            _HISTORY_MAX_COLUMNS["disk_mbps"],
+            _HISTORY_MAX_COLUMNS["net_kbps"],
         ]
     ]
     return training, profiles, dropped_rows

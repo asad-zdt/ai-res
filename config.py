@@ -22,10 +22,26 @@ FEATURE_COLUMNS = [
     "app_name",
     "app_category",
     "exe_size_mb",
+    # Rolling mean of prior runs (leakage-safe)
     "hist_avg_cpu_pct",
     "hist_avg_ram_mb",
     "hist_avg_disk_mbps",
     "hist_avg_net_kbps",
+    # Rolling std-dev: captures how predictable each resource is
+    "hist_std_cpu_pct",
+    "hist_std_ram_mb",
+    "hist_std_disk_mbps",
+    "hist_std_net_kbps",
+    # Rolling min: lower bound of observed usage
+    "hist_min_cpu_pct",
+    "hist_min_ram_mb",
+    "hist_min_disk_mbps",
+    "hist_min_net_kbps",
+    # Rolling max: upper bound / worst-case usage
+    "hist_max_cpu_pct",
+    "hist_max_ram_mb",
+    "hist_max_disk_mbps",
+    "hist_max_net_kbps",
 ]
 
 TARGET_COLUMNS = ["cpu_pct", "ram_mb", "disk_mbps", "net_kbps"]
@@ -35,7 +51,7 @@ API_PORT = 8000
 
 RAM_MARGIN = 2.0
 CPU_MARGIN = 1.5
-RESERVE_RAM_MB = 1024
+RESERVE_RAM_MB = 256
 
 
 if __name__ == "__main__":

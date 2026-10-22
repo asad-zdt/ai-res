@@ -20,9 +20,11 @@ def _model_path() -> Path:
     return path if path.is_absolute() else resolve_path(configured_path)
 
 
-@lru_cache(maxsize=None)
-def _load_bundle(model_path: str) -> dict[str, Any]:
-    """Load and cache one model bundle per resolved path."""
+@lru_cache(maxsize=4)
+def _load_bundle(
+    model_path: str, _modified_ns: int, _size_bytes: int
+) -> dict[str, Any]:
+    """Load and cache one model bundle per path and file version."""
     path = Path(model_path)
     if not path.is_file():
         raise FileNotFoundError(
@@ -33,7 +35,13 @@ def _load_bundle(model_path: str) -> dict[str, Any]:
 
 def predict(app_name: str) -> dict[str, float]:
     """Predict resource metrics for an application in the saved app profiles."""
-    bundle = _load_bundle(str(_model_path().resolve()))
+    path = _model_path().resolve()
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Model bundle not found at {path}; run `python -m model.train`."
+        )
+    stat = path.stat()
+    bundle = _load_bundle(str(path), stat.st_mtime_ns, stat.st_size)
     try:
         profile = bundle["app_profiles"][app_name]
     except KeyError:

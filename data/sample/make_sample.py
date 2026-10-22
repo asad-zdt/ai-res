@@ -37,19 +37,38 @@ def generate_dataset(seed: int = 42) -> pd.DataFrame:
 
         for run_index in range(5):
             if prior_targets:
-                history = np.mean(prior_targets, axis=0)
+                history_arr = np.asarray(prior_targets)
+                history_mean = np.mean(history_arr, axis=0)
+                history_std = np.std(history_arr, axis=0, ddof=1) if len(prior_targets) >= 2 else np.zeros(4)
+                history_min = np.min(history_arr, axis=0)
+                history_max = np.max(history_arr, axis=0)
             else:
-                history = np.maximum(0.0, base * (1.0 + rng.normal(0.0, 0.05, 4)))
+                history_mean = np.maximum(0.0, base * (1.0 + rng.normal(0.0, 0.05, 4)))
+                history_std = np.zeros(4)
+                history_min = history_mean.copy()
+                history_max = history_mean.copy()
 
             targets = np.maximum(0.0, base * (1.0 + rng.normal(0.0, 0.15, 4)))
             record: dict[str, object] = {
                 "app_name": app_name,
                 "app_category": category,
                 "exe_size_mb": exe_size_mb,
-                "hist_avg_cpu_pct": history[0],
-                "hist_avg_ram_mb": history[1],
-                "hist_avg_disk_mbps": history[2],
-                "hist_avg_net_kbps": history[3],
+                "hist_avg_cpu_pct": history_mean[0],
+                "hist_avg_ram_mb": history_mean[1],
+                "hist_avg_disk_mbps": history_mean[2],
+                "hist_avg_net_kbps": history_mean[3],
+                "hist_std_cpu_pct": history_std[0],
+                "hist_std_ram_mb": history_std[1],
+                "hist_std_disk_mbps": history_std[2],
+                "hist_std_net_kbps": history_std[3],
+                "hist_min_cpu_pct": history_min[0],
+                "hist_min_ram_mb": history_min[1],
+                "hist_min_disk_mbps": history_min[2],
+                "hist_min_net_kbps": history_min[3],
+                "hist_max_cpu_pct": history_max[0],
+                "hist_max_ram_mb": history_max[1],
+                "hist_max_disk_mbps": history_max[2],
+                "hist_max_net_kbps": history_max[3],
             }
             record.update(dict(zip(TARGET_COLUMNS, targets, strict=True)))
             records.append(record)

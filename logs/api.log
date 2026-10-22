@@ -1,0 +1,14 @@
+INFO:     Started server process [15456]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:63159 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63159 - "POST /predict HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63159 - "POST /run-and-compare HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59955 - "POST /run-and-compare HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60279 - "POST /predict HTTP/1.1" 200 OK
+INFO:     Started server process [28916]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:60087 - "GET /health HTTP/1.1" 200 OK

@@ -72,19 +72,15 @@ Run the data and model tasks in this order. Initial collection runs the configur
 
 `collect` creates or resumes `data/raw/runs.csv`. `dataset` requires that file and creates `data/processed/dataset.csv` and `data/processed/app_profiles.csv`. Training writes `model/artifacts/model.pkl`, and evaluation writes reports under `reports/`.
 
-Start the API in one PowerShell window and leave it running:
-
-```powershell
-.\tasks.ps1 api
-```
-
-In a second PowerShell window, start the dashboard:
+Launch the desktop application:
 
 ```powershell
 .\tasks.ps1 gui
 ```
 
-Streamlit normally serves the dashboard at `http://localhost:8501`; the API listens only on `http://127.0.0.1:8000`. The API supports `GET /health`, `POST /predict`, and `POST /run-and-compare`. For example:
+The Tkinter window starts the local API if it is not already running. Select a configured workload or an installed application from the list, or use **Browse .exe...** to choose an executable. Newly selected apps are registered locally; they need history before the model can predict them. **Prepare selected app** collects up to eight valid runs (launching the app with no arguments and stopping each attempt after 15 seconds), rebuilds the dataset, trains the model, and evaluates it. The comparison view includes predicted-versus-actual charts, an error table, enforcement details, and recent comparisons. The GUI stops the API on close only when it started that API itself.
+
+The API listens only on `http://127.0.0.1:8000` and supports `GET /health`, `POST /predict`, and `POST /run-and-compare`. To start the API separately, use `.\tasks.ps1 api`. For example:
 
 ```powershell
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/predict" -Method Post -ContentType "application/json" -Body '{"app_name":"cpu_burn"}'
@@ -106,9 +102,9 @@ These mechanisms correspond conceptually to the Linux cgroups v2 design in `vibe
 
 Normal-priority changes and Job Objects for processes spawned by this application generally do not require administrator rights. Job creation or assignment can still fail because of Windows/host restrictions or an incompatible parent Job Object. The application reports that as unavailable or an API error; elevating the API is not a guaranteed remedy.
 
-## Dashboard
+## Desktop GUI
 
-The Streamlit UI shows API status and active predictor, lets you select a configured app, requests predictions and run comparisons, and renders resource gauges and comparison charts. It calls the local API from the Streamlit server process, so keep both `.\tasks.ps1 api` and `.\tasks.ps1 gui` running in separate PowerShell windows. The GUI's API base URL can be overridden with `API_URL`; its default is `http://127.0.0.1:8000`.
+The Tkinter GUI is launched with `.\tasks.ps1 gui`. It provides an installed/configured-app selector, an executable browser, prediction gauges, predicted-versus-actual charts, an error summary, enforcement details, and recent comparison history. Installed-app discovery uses Windows application registry entries; some apps may only be available through **Browse .exe...**. Selected executable paths are stored in the ignored local file `data/user_apps.yaml`. The API starts automatically when needed. Its base URL can be overridden with `API_URL`; the default is `http://127.0.0.1:8000`.
 
 ## Tests
 
@@ -137,7 +133,7 @@ The suite includes unit tests for schemas, feature leakage, monitoring, admissio
 |   `-- processed/              Training dataset and serving profiles (generated)
 |-- docs/                       API and feature/target contract
 |-- features/                   Leakage-safe feature and profile builder
-|-- gui/                        Streamlit app, API client, and UI components
+|-- gui/                        Tkinter desktop app and API client
 |-- model/                      Training, evaluation, and prediction code
 |   `-- artifacts/              Serialized trained model bundle (generated)
 |-- os_integration/             Admission policy, Windows Job Objects, and priority handling
