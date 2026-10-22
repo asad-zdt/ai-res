@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import socket
 import subprocess
 import sys
@@ -22,7 +23,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from collector.config_loader import load_apps
 from config import resolve_path
-from os_integration.job_manager import JobManager
+from os_integration.factory import create_enforcement_manager
 
 _METRIC_NAMES = ("cpu_pct", "ram_mb", "disk_mbps", "net_kbps")
 _PROCESS_ERRORS = (
@@ -54,7 +55,7 @@ def _run_stage(
     arguments: list[str],
 ) -> None:
     """Run a project module and stop immediately when it returns an error."""
-    python = resolve_path(".venv", "Scripts", "python.exe")
+    python = _venv_python()
     command = [str(python), *arguments]
     print(f"\n> {' '.join(arguments)}")
     try:
@@ -75,6 +76,16 @@ def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.bind(("127.0.0.1", 0))
         return int(listener.getsockname()[1])
+
+
+def _venv_python() -> Path:
+    """Return the virtual environment's Python executable for this platform."""
+    executable = (
+        Path("Scripts") / "python.exe"
+        if os.name == "nt"
+        else Path("bin") / "python"
+    )
+    return resolve_path(".venv", *executable.parts)
 
 
 def _request_json(
@@ -231,7 +242,7 @@ def main() -> int:
 
         port = _free_port()
         base_url = f"http://127.0.0.1:{port}"
-        python = resolve_path(".venv", "Scripts", "python.exe")
+        python = _venv_python()
         command = [
             str(python),
             "-m",
@@ -243,13 +254,16 @@ def main() -> int:
             str(port),
         ]
         try:
+            process_options: dict[str, Any] = {}
+            if os.name == "nt":
+                process_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
             api_process = subprocess.Popen(
                 command,
                 cwd=resolve_path(),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                **process_options,
             )
         except OSError as error:
             detail = f"could not start API: {error}"
@@ -325,16 +339,17 @@ def main() -> int:
             raise E2EFailure(f"run-and-compare failed: {error}") from error
 
         _record(results, "run-and-compare cpu_burn", "PASS")
-        if not JobManager().is_available():
+        enforcement_manager = create_enforcement_manager()
+        if not enforcement_manager.is_available():
             reason = comparison["enforcement"].get("reason")
             _record(
                 results,
-                "Job Object enforcement",
+                "OS resource enforcement",
                 "SKIPPED",
-                str(reason or "Job Objects are unavailable on this machine"),
+                str(reason or "OS resource enforcement is unavailable"),
             )
         else:
-            _record(results, "Job Object enforcement", "PASS")
+            _record(results, "OS resource enforcement", "PASS")
     except E2EFailure:
         pass
     except Exception as error:

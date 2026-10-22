@@ -17,8 +17,6 @@ def test_load_default_config_and_expand_command_placeholders(tmp_path: Path) -> 
         "disk_writer",
         "sort_big",
         "compile_build",
-        "ffmpeg_encode",
-        "curl_download",
     } <= apps.keys()
     assert all(2 <= len(spec.variants) <= 3 for spec in apps.values())
 
@@ -72,3 +70,23 @@ apps:
 
     with pytest.warns(RuntimeWarning, match="Skipping optional"):
         assert load_apps(config_path) == {}
+
+
+def test_linux_uses_additional_linux_workload_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Select the separate Linux config without changing the Windows config."""
+    import collector.config_loader as config_loader
+
+    monkeypatch.setattr(config_loader.sys, "platform", "linux")
+
+    apps = load_apps()
+
+    assert {"cpu_burn", "mem_hog", "disk_writer", "sort_big", "compile_build"} <= (
+        apps.keys()
+    )
+    disk_writer = apps["disk_writer"]
+    assert disk_writer.command[0] == config_loader.sys.executable
+    assert disk_writer.command[1].endswith(
+        "collector/workloads/disk_writer.py"
+    )

@@ -4,22 +4,15 @@ import ctypes
 import os
 import sys
 from contextlib import contextmanager
-from dataclasses import dataclass
 from typing import Iterator
 
 import psutil
 
+from os_integration.limits import Limits
+
 
 class JobUnavailable(RuntimeError):
     """Raised when Windows Job Object functionality is unavailable."""
-
-
-@dataclass(frozen=True)
-class Limits:
-    """CPU and committed-memory limits for one Windows job."""
-
-    cpu_cores: float
-    memory_mb: float
 
 
 class _CpuRateControlInformation(ctypes.Structure):

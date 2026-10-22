@@ -1,6 +1,7 @@
 """Safe Windows process priority controls."""
 
 import os
+import sys
 
 import psutil
 
@@ -37,14 +38,20 @@ def set_priority(
     level: int,
     include_children: bool = True,
 ) -> int:
-    """Apply a safe priority class to a spawned process and optionally its tree.
+    """Apply platform-appropriate priority to a spawned process and its tree.
 
     Child processes inherit their parent's priority class when created. Applying
     priority while the application is still suspended therefore also covers
     children it creates after resuming.
     """
     _validate_pid(pid)
-    priority_class = priority_class_for_level(level)
+    if level not in {0, 5, 10}:
+        raise ValueError("level must be one of 0, 5, or 10")
+    priority = (
+        priority_class_for_level(level)
+        if sys.platform == "win32"
+        else level
+    )
     try:
         root = psutil.Process(pid)
     except _PROCESS_ERRORS:
@@ -58,7 +65,7 @@ def set_priority(
     applied_to_root = False
     for process in [*reversed(children), root]:
         try:
-            process.nice(priority_class)
+            process.nice(priority)
             if process.pid == pid:
                 applied_to_root = True
         except _PROCESS_ERRORS:

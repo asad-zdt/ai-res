@@ -2,7 +2,7 @@
 
 ## What it does
 
-The engine predicts an application's CPU, memory, disk-I/O, and network needs from its name and historical measurements before launching it. It can reject runs that exceed current resource headroom, then launch configured workloads and compare their predictions with observed usage. On Windows, it can apply process priority classes and, when pywin32 Job Objects are available, CPU and memory limits.
+The engine predicts an application's CPU, memory, disk-I/O, and network needs from its name and historical measurements before launching it. It can reject runs that exceed current resource headroom, then launch configured workloads and compare their predictions with observed usage. On Windows it can use process priority classes and Job Objects; on Linux it can use nice levels and cgroups v2.
 
 ## Architecture
 
@@ -15,21 +15,23 @@ flowchart LR
     Model --> Predictor[Predictor]
     Predictor --> API[FastAPI]
     API --> Admission[Admission control]
-    Admission --> Jobs[Windows Job Objects]
-    Admission --> Priority[Windows priority class]
-    GUI[Streamlit GUI] --> API
+    Admission --> OSAdapter[Platform enforcement adapter]
+    OSAdapter --> Jobs[Windows Job Objects]
+    OSAdapter --> Cgroups[Linux cgroups v2]
+    OSAdapter --> Priority[Windows priority class / Linux nice]
+    GUI[Desktop GUI] --> API
 ```
 
-The collector runs the workloads listed in `collector/apps_config.yaml` and records process-tree resource measurements. The feature builder uses prior valid runs as historical features, then writes the training dataset and serving profiles; the trainer saves its model bundle to `model/artifacts/model.pkl`. FastAPI uses the model when the bundle exists (or the deterministic mock predictor otherwise), and the Streamlit GUI calls the API.
+The collector selects `collector/apps_config.yaml` on Windows and `collector/apps_config_linux.yaml` on Linux, then records process-tree resource measurements. The feature builder uses prior valid runs as historical features, then writes the training dataset and serving profiles; the trainer saves its model bundle to `model/artifacts/model.pkl`. FastAPI uses the model when the bundle exists (or the deterministic mock predictor otherwise), and the desktop GUI calls the API.
 
-The diagram shows the current Windows integration. The project plan in `vibe.md` describes a Linux cgroups v2 counterpart (`cpu.max`, `memory.max`, and `cgroup.procs`), but that is a design reference, not a supported or implemented runtime here.
+Windows retains its Job Object and priority-class implementation. Linux uses a separate adapter and a delegated cgroups v2 subtree; if cgroups are unavailable, it applies process niceness and reports that CPU and memory caps were not applied.
 
 ## Requirements
 
-- Windows 10 or Windows 11.
+- Windows 10/11 or a Linux distribution with cgroups v2.
 - Python 3.11 or newer available as `python` on `PATH`.
-- PowerShell.
-- Python packages in `requirements.txt`, installed by `.\tasks.ps1 setup`.
+- PowerShell on Windows; Linux task dispatcher on Linux.
+- Python packages in `requirements.txt`, installed with the platform task runner.
 - **Optional enforcement dependency:** `pywin32` is not in `requirements.txt`. Install it to enable Windows Job Object CPU and memory limits. Without it, the API can still run applications but reports that the caps were not applied.
 - **External workload executable:** `ffmpeg.exe` on `PATH` is used by `ffmpeg_encode`. It is not a Python dependency. Although ffmpeg is optional to the general engine, the current `collector/apps_config.yaml` does not mark this app optional; the app loader can therefore fail if ffmpeg is missing. Install ffmpeg or explicitly mark `ffmpeg_encode` optional in that configuration before running collection.
 - `edge_headless` is already marked optional and is skipped when its executable is unavailable.
@@ -75,10 +77,12 @@ Run the data and model tasks in this order. Initial collection runs the configur
 Launch the desktop application:
 
 ```powershell
-.\tasks.ps1 gui
+cd ..
 ```
 
 The Tkinter window starts the local API if it is not already running. Select a configured workload or an installed application from the list, or use **Browse .exe...** to choose an executable. Newly selected apps are registered locally; they need history before the model can predict them. **Prepare selected app** collects up to eight valid runs (launching the app with no arguments and stopping each attempt after 15 seconds), rebuilds the dataset, trains the model, and evaluates it. The comparison view includes predicted-versus-actual charts, an error table, enforcement details, and recent comparisons. The GUI stops the API on close only when it started that API itself.
+
+On Linux, run tasks through `python scripts/linux_tasks.py <task>`; the `setup`, `collect`, `dataset`, `train`, `eval`, `api`, `gui`, `test`, and `e2e` tasks are available. For Linux GUI startup, Tkinter must be installed for the Python environment. Linux uses the configured benchmark workloads and can browse executable files; it does not use Windows registry discovery.
 
 The API listens only on `http://127.0.0.1:8000` and supports `GET /health`, `POST /predict`, and `POST /run-and-compare`. To start the API separately, use `.\tasks.ps1 api`. For example:
 
@@ -98,13 +102,15 @@ The API serializes `/run-and-compare` runs within one process and checks admissi
 
 The predicted CPU demand selects a Windows priority class: normal below 60%, below-normal from 60%, and idle from 150%. When pywin32 is available, the API creates a Job Object for the launched process, applies a hard CPU-rate cap and a job committed-memory limit, and enables kill-on-close. The CPU cap is derived from the predicted CPU demand with a 1.5× margin, bounded to 0.25 through the machine's logical core count; the memory limit uses 2× predicted RAM with a 128 MB minimum. A Job Object memory limit is based on committed memory, not the process-tree RSS metric. If Job Objects are unavailable, workload execution can continue without CPU or memory caps, with that outcome reported in the response.
 
-These mechanisms correspond conceptually to the Linux cgroups v2 design in `vibe.md`: the Windows CPU rate cap maps to `cpu.max`, the Job Object memory limit maps to `memory.max`, and Job Object membership/process-tree control maps to `cgroup.procs`. Linux `memory.high` and cgroup accounting have no direct equivalent implemented here. The Linux setup design requires enabling controllers and elevated permissions; it does not apply to this Windows implementation.
+The Windows Job Object implementation remains platform-specific. Linux uses cgroups v2 `cpu.max`, `memory.max`, and `cgroup.procs` through the separate manager described in [docs/linux_setup.md](./docs/linux_setup.md). Linux limits require a delegated writable subtree with CPU and memory controllers enabled; otherwise the run uses process niceness only and reports that limits were not applied.
 
 Normal-priority changes and Job Objects for processes spawned by this application generally do not require administrator rights. Job creation or assignment can still fail because of Windows/host restrictions or an incompatible parent Job Object. The application reports that as unavailable or an API error; elevating the API is not a guaranteed remedy.
 
 ## Desktop GUI
 
-The Tkinter GUI is launched with `.\tasks.ps1 gui`. It provides an installed/configured-app selector, an executable browser, prediction gauges, predicted-versus-actual charts, an error summary, enforcement details, and recent comparison history. Installed-app discovery uses Windows application registry entries; some apps may only be available through **Browse .exe...**. Selected executable paths are stored in the ignored local file `data/user_apps.yaml`. The API starts automatically when needed. Its base URL can be overridden with `API_URL`; the default is `http://127.0.0.1:8000`.
+The Tkinter GUI is launched with `.\tasks.ps1 gui` on Windows or `python scripts/linux_tasks.py gui` on Linux. It provides a configured-app selector, executable browser, prediction gauges, predicted-versus-actual charts, an error summary, enforcement details, and recent comparison history. Installed-app discovery uses the Windows application registry on Windows; Linux users can select configured workloads or browse an executable. Selected executable paths are stored in the ignored local file `data/user_apps.yaml`. The API starts automatically when needed. Its base URL can be overridden with `API_URL`; the default is `http://127.0.0.1:8000`.
+
+See [docs/linux_setup.md](./docs/linux_setup.md) for Linux environment and cgroups v2 requirements.
 
 ## Tests
 
@@ -114,7 +120,7 @@ Run the test suite from the project root:
 .\tasks.ps1 test
 ```
 
-The suite includes unit tests for schemas, feature leakage, monitoring, admission, API behavior, and simulated Job Object operations. Tests that require actual Windows Job Object capability may be skipped when that capability is unavailable. The coverage plugin is not listed in `requirements.txt`; to generate a coverage report, install it into the venv first:
+The suite includes unit tests for schemas, feature leakage, monitoring, admission, API behavior, and simulated Windows Job Object and Linux cgroup operations. Tests requiring actual OS enforcement capabilities are skipped when unavailable. The coverage plugin is not listed in `requirements.txt`; to generate a coverage report, install it into the venv first:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install pytest-cov
@@ -138,7 +144,9 @@ The suite includes unit tests for schemas, feature leakage, monitoring, admissio
 |   `-- artifacts/              Serialized trained model bundle (generated)
 |-- os_integration/             Admission policy, Windows Job Objects, and priority handling
 |-- reports/                    Model evaluation reports
-|-- scripts/                    End-to-end workflow runner
+|-- scripts/
+|   |-- e2e.py                  End-to-end workflow runner
+|   `-- linux_tasks.py          Linux task dispatcher
 |-- service/                    FastAPI app, schemas, and mock predictor
 |-- tests/                      Pytest suite
 |-- config.py                   Repository-root path helper and shared schemas
@@ -169,5 +177,5 @@ The suite includes unit tests for schemas, feature leakage, monitoring, admissio
 - Process-tree CPU can exceed 100% on multi-core machines; RAM is peak summed RSS. A Job Object's memory cap instead applies to committed memory.
 - Predictions depend on having valid historical runs and serving profiles for each configured app. The model is only as representative as the collected workload history.
 - Collection runs sequential, potentially resource-intensive workloads; the network workload downloads data and measurements vary with machine load and background activity.
-- Windows enforcement is optional and may not be available in restricted environments. This repository does not implement the Linux cgroups v2 design as an alternative runtime.
+- Windows Job Object and Linux cgroup enforcement are optional and may be unavailable in restricted environments.
 - The API is configured for local access, has no authentication, and serializes comparison runs only within one application process. Do not expose it to an untrusted network.

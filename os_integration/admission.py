@@ -7,7 +7,7 @@ from typing import Any
 import psutil
 
 from config import CPU_MARGIN, RAM_MARGIN, RESERVE_RAM_MB
-from os_integration.job_manager import Limits
+from os_integration.limits import Limits
 from os_integration.priority import choose_niceness
 
 

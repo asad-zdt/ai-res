@@ -181,6 +181,7 @@ def test_job_group_cleans_up_after_exception(
     assert cleanups == [handle]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows priority classes required")
 def test_priority_levels_map_to_safe_classes() -> None:
     """Map API levels to normal, below-normal, and idle classes."""
     assert priority_class_for_level(0) == psutil.NORMAL_PRIORITY_CLASS

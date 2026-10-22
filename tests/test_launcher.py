@@ -4,6 +4,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 from collector.config_loader import AppSpec
 from collector.launcher import cleanup, launch, resume
 
@@ -17,7 +19,10 @@ def _python_spec() -> AppSpec:
         cwd=os.getcwd(),
         timeout_s=10.0,
         variants=(
-            ("open(r'{tmp}\\marker.txt', 'w').write('ok')",),
+            (
+                "from pathlib import Path; "
+                "Path(r'{tmp}').joinpath('marker.txt').write_text('ok')",
+            ),
             ("print('second')",),
         ),
         exe=Path(sys.executable),
@@ -36,6 +41,10 @@ def test_launch_uses_variant_and_cleanup_removes_temp_directory() -> None:
     assert not launched.tmp_dir.exists()
 
 
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="Windows suspended-process support required",
+)
 def test_resume_resumes_spawned_process(monkeypatch) -> None:
     """Resume the process ID associated with the launch handle."""
     resumed: list[bool] = []
@@ -48,8 +57,30 @@ def test_resume_resumes_spawned_process(monkeypatch) -> None:
             resumed.append(True)
 
     monkeypatch.setattr("collector.launcher.psutil.Process", FakeProcess)
-    launched = type("Launch", (), {"popen": type("Process", (), {"pid": 12345})()})()
+    launched = type(
+        "Launch",
+        (),
+        {"popen": type("Process", (), {"pid": 12345})(), "resume_fd": None},
+    )()
 
     resume(launched)
 
     assert resumed == [True]
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux launch gate required")
+def test_linux_suspended_launch_waits_until_resume(tmp_path: Path) -> None:
+    """A Linux suspended launch must not execute workload code before resume."""
+    import time
+
+    spec = _python_spec()
+    launched = launch(spec, suspended=True)
+    marker = launched.tmp_dir / "marker.txt"
+    try:
+        time.sleep(0.1)
+        assert not marker.exists()
+        resume(launched)
+        assert launched.popen.wait(timeout=10) == 0
+        assert marker.read_text(encoding="utf-8") == "ok"
+    finally:
+        cleanup(launched)

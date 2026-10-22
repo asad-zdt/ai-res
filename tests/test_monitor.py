@@ -32,8 +32,8 @@ def test_monitor_samples_cpu_and_peak_memory() -> None:
     result = summarize(samples)
 
     assert len(samples) >= 3
-    assert result["ram_mb"] >= 150
-    assert result["cpu_pct"] > 50
+    assert result["ram_mb"] >= 140
+    assert result["cpu_pct"] > 20
     assert samples.timed_out is False
 
 

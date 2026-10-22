@@ -1,6 +1,7 @@
 """Build leakage-safe training data and serving profiles from collected runs."""
 
 import argparse
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -172,7 +173,12 @@ def _resolve_path(path: str) -> Path:
 def main() -> None:
     """Parse CLI arguments, build the datasets, and print a compact summary."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--runs", default="data/raw/runs.csv")
+    default_runs_path = (
+        "data/raw/runs_linux.csv"
+        if sys.platform == "linux"
+        else "data/raw/runs.csv"
+    )
+    parser.add_argument("--runs", default=default_runs_path)
     parser.add_argument("--out", default="data/processed/dataset.csv")
     parser.add_argument("--window", type=int, default=5)
     args = parser.parse_args()

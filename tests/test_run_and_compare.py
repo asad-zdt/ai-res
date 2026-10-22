@@ -1,5 +1,6 @@
 """Tests for the run-and-compare API endpoint."""
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,6 +10,7 @@ from fastapi.testclient import TestClient
 from collector.config_loader import AppSpec
 from os_integration.admission import AdmissionDecision
 from os_integration.job_manager import Limits
+from os_integration.linux_cgroup_manager import LinuxCgroupUnavailable
 from service.app import app, run_and_compare
 from service.schemas import PredictRequest
 
@@ -96,7 +98,10 @@ def test_run_and_compare_success_path(monkeypatch: pytest.MonkeyPatch) -> None:
         def cleanup(self, handle: object) -> None:
             return None
 
-    monkeypatch.setattr("service.app.JobManager", AvailableJobManager)
+    monkeypatch.setattr(
+        "service.app.create_enforcement_manager",
+        AvailableJobManager,
+    )
     response = client.post("/run-and-compare", json={"app_name": "cpu_burn"})
 
     assert response.status_code == 200
@@ -156,13 +161,48 @@ def test_run_and_compare_without_job_objects_continues(
         def is_available(self) -> bool:
             return False
 
-    monkeypatch.setattr("service.app.JobManager", UnavailableJobManager)
+    monkeypatch.setattr(
+        "service.app.create_enforcement_manager",
+        UnavailableJobManager,
+    )
     response = client.post("/run-and-compare", json={"app_name": "cpu_burn"})
 
     assert response.status_code == 200
     enforcement = response.json()["enforcement"]
     assert enforcement["cgroup_applied"] is False
-    assert "Job Objects are unavailable" in enforcement["reason"]
+    expected_reason = (
+        "Linux cgroups v2 are unavailable"
+        if os.name != "nt"
+        else "Windows Job Objects are unavailable"
+    )
+    assert expected_reason in enforcement["reason"]
+
+
+def test_linux_run_and_compare_falls_back_when_cgroups_are_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Linux cgroup setup denial continues with nice priority only."""
+    _patch_common(monkeypatch)
+    monkeypatch.setattr("service.app.sys.platform", "linux")
+
+    class UnavailableCgroupManager:
+        def is_available(self) -> bool:
+            return True
+
+        def create(self, limits: Limits) -> object:
+            raise LinuxCgroupUnavailable("permission denied")
+
+    monkeypatch.setattr(
+        "service.app.create_enforcement_manager",
+        UnavailableCgroupManager,
+    )
+
+    response = client.post("/run-and-compare", json={"app_name": "cpu_burn"})
+
+    assert response.status_code == 200
+    enforcement = response.json()["enforcement"]
+    assert enforcement["cgroup_applied"] is False
+    assert "continues with niceness only: permission denied" in enforcement["reason"]
 
 
 def test_run_and_compare_cleans_up_on_monitor_exception(
@@ -175,7 +215,10 @@ def test_run_and_compare_cleans_up_on_monitor_exception(
         def is_available(self) -> bool:
             return False
 
-    monkeypatch.setattr("service.app.JobManager", UnavailableJobManager)
+    monkeypatch.setattr(
+        "service.app.create_enforcement_manager",
+        UnavailableJobManager,
+    )
     launched = _fake_launch()
     monkeypatch.setattr("service.app.launcher.launch", lambda *args, **kwargs: launched)
 
@@ -226,7 +269,7 @@ def test_run_and_compare_closes_job_on_monitor_exception(
             self.cleaned.append(handle)
 
     manager = AvailableJobManager()
-    monkeypatch.setattr("service.app.JobManager", lambda: manager)
+    monkeypatch.setattr("service.app.create_enforcement_manager", lambda: manager)
 
     def fail_monitor(*args, **kwargs):
         raise RuntimeError("monitor failed")

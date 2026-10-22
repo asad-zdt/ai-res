@@ -1,0 +1,99 @@
+apps:
+  - name: cpu_burn
+    category: synthetic_cpu
+    command:
+      - "{python}"
+      - "{repo}/collector/workloads/cpu_burn.py"
+    cwd: "{repo}"
+    timeout_s: 60
+    variants:
+      - ["--seconds", "12", "--workers", "1"]
+      - ["--seconds", "20", "--workers", "2"]
+      - ["--seconds", "30", "--workers", "4"]
+    exe: "{repo}/collector/workloads/cpu_burn.py"
+
+  - name: mem_hog
+    category: synthetic_memory
+    command:
+      - "{python}"
+      - "{repo}/collector/workloads/mem_hog.py"
+    cwd: "{repo}"
+    timeout_s: 60
+    variants:
+      - ["--mb", "128", "--seconds", "12"]
+      - ["--mb", "256", "--seconds", "20"]
+      - ["--mb", "512", "--seconds", "30"]
+    exe: "{repo}/collector/workloads/mem_hog.py"
+
+  - name: disk_writer
+    category: synthetic_disk
+    command:
+      - "{python}"
+      - "{repo}/collector/workloads/disk_writer.py"
+    cwd: "{repo}"
+    timeout_s: 60
+    variants:
+      - ["--mb", "256", "--tmp-dir", "{tmp}"]
+      - ["--mb", "512", "--tmp-dir", "{tmp}"]
+      - ["--mb", "1024", "--tmp-dir", "{tmp}"]
+    exe: "{repo}/collector/workloads/disk_writer.py"
+
+  - name: sort_big
+    category: synthetic_cpu_memory
+    command:
+      - "{python}"
+      - "{repo}/collector/workloads/sort_big.py"
+    cwd: "{repo}"
+    timeout_s: 60
+    variants:
+      - ["--lines", "500000", "--output", "{tmp}/sorted.txt"]
+      - ["--lines", "1000000", "--output", "{tmp}/sorted.txt"]
+      - ["--lines", "1500000", "--output", "{tmp}/sorted.txt"]
+    exe: "{repo}/collector/workloads/sort_big.py"
+
+  - name: compile_build
+    category: synthetic_cpu_disk
+    command:
+      - "{python}"
+      - "{repo}/collector/workloads/compile_job.py"
+    cwd: "{repo}"
+    timeout_s: 60
+    variants:
+      - ["--modules", "5000", "--tmp-dir", "{tmp}"]
+      - ["--modules", "10000", "--tmp-dir", "{tmp}"]
+      - ["--modules", "15000", "--tmp-dir", "{tmp}"]
+    exe: "{repo}/collector/workloads/compile_job.py"
+
+  - name: ffmpeg_encode
+    category: media
+    command:
+      - ffmpeg
+      - -hide_banner
+      - -loglevel
+      - error
+      - -y
+      - -f
+      - lavfi
+      - -i
+      - "testsrc=size=640x360:rate=30"
+    cwd: "{repo}"
+    timeout_s: 60
+    variants:
+      - ["-t", "12", "-c:v", "mpeg4", "{tmp}/encoded.mp4"]
+      - ["-t", "20", "-c:v", "mpeg4", "{tmp}/encoded.mp4"]
+      - ["-t", "30", "-c:v", "mpeg4", "{tmp}/encoded.mp4"]
+    exe: ffmpeg
+    optional: true
+
+  - name: curl_download
+    category: network
+    command:
+      - curl
+    cwd: "{repo}"
+    timeout_s: 60
+    variants:
+      - ["-fsSL", "--max-time", "55", "-o", "/dev/null", "https://speed.cloudflare.com/__down?bytes=30000000"]
+      - ["-fsSL", "--max-time", "55", "-o", "/dev/null", "https://speed.cloudflare.com/__down?bytes=50000000"]
+      - ["-fsSL", "--max-time", "55", "-o", "/dev/null", "https://speed.cloudflare.com/__down?bytes=70000000"]
+    exe: curl
+    optional: true

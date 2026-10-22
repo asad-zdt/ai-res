@@ -2,6 +2,7 @@
 
 import argparse
 import csv
+import sys
 import time
 import uuid
 from datetime import datetime, timezone
@@ -30,7 +31,11 @@ RUN_COLUMNS = [
     "valid",
 ]
 _METRIC_COLUMNS = ("cpu_pct", "ram_mb", "disk_mbps", "net_kbps")
-_DEFAULT_RUNS_PATH = resolve_path("data", "raw", "runs.csv")
+_DEFAULT_RUNS_PATH = resolve_path(
+    "data",
+    "raw",
+    "runs_linux.csv" if sys.platform == "linux" else "runs.csv",
+)
 
 
 def _read_app_counts(runs_path: Path) -> tuple[dict[str, int], dict[str, int]]:

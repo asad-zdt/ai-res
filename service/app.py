@@ -1,6 +1,7 @@
 """FastAPI application for resource predictions."""
 
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -15,7 +16,12 @@ from config import resolve_path
 from errors import UnknownAppError
 from model.predict import predict as model_predict
 from os_integration import admission
-from os_integration.job_manager import JobManager, JobUnavailable
+from os_integration.factory import create_enforcement_manager
+from os_integration.job_manager import JobUnavailable
+from os_integration.linux_cgroup_manager import (
+    LinuxCgroupCleanupError,
+    LinuxCgroupUnavailable,
+)
 from os_integration.priority import set_priority
 from service.mock_predict import mock_predict
 from service.schemas import (
@@ -135,7 +141,7 @@ def run_and_compare(request: PredictRequest) -> RunAndCompareResponse:
         if not decision.admitted:
             raise HTTPException(status_code=409, detail=decision.reason)
 
-        manager = JobManager()
+        manager = create_enforcement_manager()
         job_handle = None
         launched = None
         actual: dict[str, float] | None = None
@@ -143,6 +149,7 @@ def run_and_compare(request: PredictRequest) -> RunAndCompareResponse:
         duration_s = 0.0
         cgroup_applied = False
         enforcement_reasons: list[str] = []
+        applied_niceness = 0
         if decision.limits is None:
             raise HTTPException(
                 status_code=500,
@@ -152,16 +159,40 @@ def run_and_compare(request: PredictRequest) -> RunAndCompareResponse:
         start_time = time.monotonic()
         try:
             launched = launcher.launch(spec, suspended=True)
-            set_priority(launched.popen.pid, decision.niceness)
+            applied_niceness = set_priority(
+                launched.popen.pid,
+                decision.niceness,
+            )
+            if applied_niceness != decision.niceness:
+                enforcement_reasons.append(
+                    f"Could not apply requested nice/priority level "
+                    f"{decision.niceness}; applied level {applied_niceness}."
+                )
 
             if manager.is_available():
-                job_handle = manager.create(decision.limits)
-                manager.attach(job_handle, launched.popen.pid)
-                cgroup_applied = True
+                try:
+                    job_handle = manager.create(decision.limits)
+                except LinuxCgroupCleanupError:
+                    raise
+                except LinuxCgroupUnavailable as error:
+                    enforcement_reasons.append(
+                        "Linux cgroups v2 limits were unavailable; the run "
+                        f"continues with niceness only: {error}"
+                    )
+                if job_handle is not None:
+                    manager.attach(job_handle, launched.popen.pid)
+                    cgroup_applied = True
             else:
-                enforcement_reasons.append(
-                    "Windows Job Objects are unavailable; CPU and memory caps were not applied."
-                )
+                if sys.platform == "linux":
+                    enforcement_reasons.append(
+                        "Linux cgroups v2 are unavailable; CPU and memory caps "
+                        "were not applied."
+                    )
+                else:
+                    enforcement_reasons.append(
+                        "Windows Job Objects are unavailable; CPU and memory "
+                        "caps were not applied."
+                    )
 
             launcher.resume(launched)
             samples = monitor.monitor_process(
@@ -170,7 +201,7 @@ def run_and_compare(request: PredictRequest) -> RunAndCompareResponse:
             )
             actual = monitor.summarize(samples)
             launched.popen.wait()
-        except JobUnavailable as error:
+        except (JobUnavailable, LinuxCgroupUnavailable) as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
         finally:
             duration_s = time.monotonic() - start_time
@@ -178,9 +209,9 @@ def run_and_compare(request: PredictRequest) -> RunAndCompareResponse:
                 if job_handle is not None:
                     try:
                         usage = manager.usage(job_handle)
-                    except JobUnavailable as error:
+                    except (JobUnavailable, LinuxCgroupUnavailable) as error:
                         enforcement_reasons.append(
-                            f"Could not read Job Object usage: {error}"
+                            f"Could not read OS enforcement usage: {error}"
                         )
                     finally:
                         manager.cleanup(job_handle)
@@ -194,8 +225,13 @@ def run_and_compare(request: PredictRequest) -> RunAndCompareResponse:
                 detail="Workload completed without resource measurements.",
             )
         if usage is not None and usage.get("limit_reached"):
+            limit_type = (
+                "cgroup memory"
+                if sys.platform == "linux"
+                else "Job Object memory"
+            )
             enforcement_reasons.append(
-                "The Job Object memory limit was reached during the run."
+                f"The {limit_type} limit was reached during the run."
             )
         return RunAndCompareResponse(
             app_name=request.app_name,
@@ -205,7 +241,7 @@ def run_and_compare(request: PredictRequest) -> RunAndCompareResponse:
             enforcement=EnforcementInfo(
                 admitted=True,
                 reason=" ".join(enforcement_reasons) or None,
-                niceness=decision.niceness,
+                niceness=applied_niceness,
                 cgroup_applied=cgroup_applied,
             ),
         )

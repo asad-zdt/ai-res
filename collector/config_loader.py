@@ -88,6 +88,10 @@ def _validate_placeholders(value: str, field: str, app_name: str) -> None:
 def _resolve_config_path(path: str | Path | None) -> Path:
     """Resolve the app YAML path relative to the repository unless absolute."""
     if path is None:
+        if sys.platform == "linux":
+            linux_config = resolve_path("collector", "apps_config_linux.yaml")
+            if linux_config.is_file():
+                return linux_config
         return resolve_path("collector", "apps_config.yaml")
     candidate = Path(path)
     return candidate if candidate.is_absolute() else resolve_path(str(path))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -57,8 +58,13 @@ def register_user_app(
 ) -> str:
     """Register an executable selected by the user and return its app identifier."""
     executable = Path(executable_path).expanduser().resolve(strict=True)
-    if not executable.is_file() or executable.suffix.casefold() != ".exe":
-        raise ValueError("Select an existing Windows .exe application.")
+    if not executable.is_file():
+        raise ValueError("Select an existing application executable.")
+    if os.name == "nt":
+        if executable.suffix.casefold() != ".exe":
+            raise ValueError("Select an existing Windows .exe application.")
+    elif not os.access(executable, os.X_OK):
+        raise ValueError("Select a file with executable permission.")
 
     path = registry_path or _DEFAULT_REGISTRY
     apps = _read_registry(path)

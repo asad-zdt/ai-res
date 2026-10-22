@@ -3,6 +3,7 @@
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,7 @@ class LaunchedApp:
 
     popen: subprocess.Popen[bytes]
     tmp_dir: Path
+    resume_fd: int | None = None
 
 
 def launch(
@@ -31,35 +33,75 @@ def launch(
     variant_index: int = 0,
     suspended: bool = False,
 ) -> LaunchedApp:
-    """Launch one configured app variant, optionally suspended on Windows."""
+    """Launch a workload, suspended on Windows or gated on Linux when requested."""
     tmp_dir = Path(tempfile.mkdtemp(prefix=f"{spec.name}_"))
+    resume_fd: int | None = None
+    read_fd: int | None = None
     try:
         command = spec.command_for_run(tmp_dir, variant_index)
         working_directory = spec.working_directory_for_run(tmp_dir)
         creationflags = 0
+        pass_fds: tuple[int, ...] = ()
         if os.name == "nt":
             creationflags |= subprocess.CREATE_NEW_PROCESS_GROUP
             creationflags |= subprocess.CREATE_NO_WINDOW
             if suspended:
                 creationflags |= 0x00000004
+        elif sys.platform == "linux" and suspended:
+            read_fd, resume_fd = os.pipe()
+            gate_code = (
+                "import os, sys; fd = int(sys.argv[1]); "
+                "ready = os.read(fd, 1); os.close(fd); "
+                "ready or sys.exit(125); "
+                "os.execvpe(sys.argv[2], sys.argv[2:], os.environ)"
+            )
+            command = [sys.executable, "-c", gate_code, str(read_fd), *command]
+            pass_fds = (read_fd,)
 
-        process = subprocess.Popen(
-            command,
-            cwd=working_directory,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            shell=False,
-            creationflags=creationflags,
-        )
+        try:
+            if pass_fds:
+                process = subprocess.Popen(
+                    command,
+                    cwd=working_directory,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    shell=False,
+                    creationflags=creationflags,
+                    pass_fds=pass_fds,
+                )
+            else:
+                process = subprocess.Popen(
+                    command,
+                    cwd=working_directory,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    shell=False,
+                    creationflags=creationflags,
+                )
+        finally:
+            if read_fd is not None:
+                os.close(read_fd)
     except BaseException:
+        if resume_fd is not None:
+            os.close(resume_fd)
         shutil.rmtree(tmp_dir, ignore_errors=True)
         raise
-    return LaunchedApp(popen=process, tmp_dir=tmp_dir)
+    return LaunchedApp(popen=process, tmp_dir=tmp_dir, resume_fd=resume_fd)
 
 
 def resume(launched: LaunchedApp) -> None:
-    """Resume a process that was created in a suspended state."""
+    """Resume or release a process held before workload execution."""
+    if launched.resume_fd is not None:
+        try:
+            os.write(launched.resume_fd, b"go")
+        finally:
+            os.close(launched.resume_fd)
+            launched.resume_fd = None
+        return
+    if os.name != "nt":
+        return
     psutil.Process(launched.popen.pid).resume()
 
 
@@ -90,6 +132,9 @@ def _terminate_process_tree(root: psutil.Process) -> None:
 def cleanup(launched: LaunchedApp) -> None:
     """Stop any remaining process tree and remove the run's temp directory."""
     try:
+        if launched.resume_fd is not None:
+            os.close(launched.resume_fd)
+            launched.resume_fd = None
         if launched.popen.poll() is None:
             try:
                 _terminate_process_tree(psutil.Process(launched.popen.pid))

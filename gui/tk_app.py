@@ -293,7 +293,9 @@ class ResourceApp:
         )
         self.app_picker.pack(side="left", padx=(8, 14))
         self.browse_button = ttk.Button(
-            controls, text="Browse .exe...", command=self._browse_executable
+            controls,
+            text="Browse .exe..." if os.name == "nt" else "Browse executable...",
+            command=self._browse_executable,
         )
         self.browse_button.pack(side="left", padx=3)
         self.predict_button = ttk.Button(
@@ -408,10 +410,14 @@ class ResourceApp:
         self.browse_button.configure(state="normal" if enabled else "disabled")
 
     def _browse_executable(self) -> None:
-        """Add an executable selected through the Windows file picker."""
+        """Add an executable selected through the platform file picker."""
         selected_path = filedialog.askopenfilename(
             title="Select an application",
-            filetypes=(("Applications", "*.exe"),),
+            filetypes=(
+                (("Applications", "*.exe"),)
+                if os.name == "nt"
+                else (("Applications", "*"),)
+            ),
         )
         if selected_path:
             self._add_application(Path(selected_path))

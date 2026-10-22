@@ -51,7 +51,7 @@ API_PORT = 8000
 
 RAM_MARGIN = 2.0
 CPU_MARGIN = 1.5
-RESERVE_RAM_MB = 256
+RESERVE_RAM_MB = 1024
 
 
 if __name__ == "__main__":
