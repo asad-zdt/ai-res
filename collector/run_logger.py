@@ -62,6 +62,26 @@ def _append_row(runs_path: Path, row: dict[str, object]) -> None:
         csv_file.flush()
 
 
+def _valid_run(
+    spec: AppSpec,
+    exit_code: int | None,
+    samples: MonitorSamples,
+    metrics: dict[str, float],
+) -> bool:
+    """Apply workload-specific validity rules to a measured run."""
+    if spec.category == "desktop_application":
+        if samples.timed_out:
+            return len(samples) >= 2 and metrics["ram_mb"] > 0
+        return exit_code == 0 and len(samples) >= 1 and metrics["ram_mb"] > 0
+    return (
+        exit_code == 0
+        and len(samples) >= 3
+        and not samples.timed_out
+        and metrics["cpu_pct"] > 0
+        and metrics["ram_mb"] > 0
+    )
+
+
 def _run_once(
     spec: AppSpec,
     variant_index: int,
@@ -77,14 +97,7 @@ def _run_once(
         metrics = summarize(samples) if samples else {
             metric: 0.0 for metric in _METRIC_COLUMNS
         }
-        timed_out = samples.timed_out
-        valid = (
-            exit_code == 0
-            and len(samples) >= 3
-            and not timed_out
-            and metrics["cpu_pct"] > 0
-            and metrics["ram_mb"] > 0
-        )
+        valid = _valid_run(spec, exit_code, samples, metrics)
     except KeyboardInterrupt:
         raise
     except Exception as error:

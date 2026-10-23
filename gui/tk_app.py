@@ -155,6 +155,205 @@ def _error_percent(predicted: float, actual: float) -> str:
     return f"{(predicted - actual) / actual * 100:.1f}%"
 
 
+def _load_app_history(
+    app_name: str,
+    runs_path: Path | None = None,
+    limit: int = 20,
+) -> list[dict[str, float]]:
+    """Read the latest valid resource measurements for one application."""
+    if limit < 1:
+        raise ValueError("limit must be positive")
+    path = runs_path or resolve_path("data", "raw", "runs.csv")
+    try:
+        with path.open("r", newline="", encoding="utf-8") as csv_file:
+            rows = csv.DictReader(csv_file)
+            history: list[dict[str, float]] = []
+            for row in rows:
+                if row.get("app_name") != app_name:
+                    continue
+                if (row.get("valid") or "").strip().casefold() != "true":
+                    continue
+                try:
+                    values = {metric: float(row[metric]) for metric, _, _ in _METRICS}
+                except (KeyError, TypeError, ValueError):
+                    continue
+                history.append(values)
+    except FileNotFoundError:
+        return []
+    return history[-limit:]
+
+
+def _load_profile_statistics(
+    app_name: str,
+    profile_path: Path | None = None,
+) -> dict[str, dict[str, float]] | None:
+    """Load per-resource historical minimum, mean, and maximum from profiles."""
+    path = profile_path or resolve_path("data", "processed", "app_profiles.csv")
+    try:
+        with path.open("r", newline="", encoding="utf-8") as csv_file:
+            for row in csv.DictReader(csv_file):
+                if row.get("app_name") != app_name:
+                    continue
+                statistics: dict[str, dict[str, float]] = {}
+                for metric, _, _ in _METRICS:
+                    values = {
+                        key: float(row[f"hist_{column}_{metric}"])
+                        for key, column in (
+                            ("min", "min"),
+                            ("average", "avg"),
+                            ("max", "max"),
+                        )
+                    }
+                    statistics[metric] = values
+                return statistics
+    except FileNotFoundError:
+        return None
+    return None
+
+
+def _history_statistics(
+    history: list[dict[str, float]],
+    window: int = 5,
+) -> dict[str, dict[str, float]] | None:
+    """Calculate min, mean, and max from the latest valid run window."""
+    if not history:
+        return None
+    recent = history[-window:]
+    return {
+        metric: {
+            "min": min(row[metric] for row in recent),
+            "average": sum(row[metric] for row in recent) / len(recent),
+            "max": max(row[metric] for row in recent),
+        }
+        for metric, _, _ in _METRICS
+    }
+
+
+def _draw_history_trends(
+    canvas: tk.Canvas,
+    history: list[dict[str, float]],
+) -> None:
+    """Draw four compact line charts from a chronological run history."""
+    canvas.delete("all")
+    if not history:
+        canvas.create_text(
+            max(canvas.winfo_width(), 500) / 2,
+            max(canvas.winfo_height(), 260) / 2,
+            text="No valid run history for this app yet.",
+            fill="#64748b",
+        )
+        return
+
+    width = max(canvas.winfo_width(), 560)
+    height = max(canvas.winfo_height(), 280)
+    cell_width, cell_height = width / 2, height / 2
+    for index, (metric, title, unit) in enumerate(_METRICS):
+        column, row = index % 2, index // 2
+        x0, y0 = column * cell_width, row * cell_height
+        left, right = x0 + 52, x0 + cell_width - 14
+        top, bottom = y0 + 30, y0 + cell_height - 28
+        values = [run[metric] for run in history]
+        maximum = max(values, default=0.0)
+        scale_max = maximum * 1.15 if maximum > 0 else 1.0
+        canvas.create_text(
+            x0 + 8, y0 + 12, text=f"{title} ({unit})", anchor="w",
+            font=("Segoe UI", 9, "bold"),
+        )
+        canvas.create_line(left, top, left, bottom, fill="#94a3b8")
+        canvas.create_line(left, bottom, right, bottom, fill="#94a3b8")
+        canvas.create_text(left - 6, top, text=f"{scale_max:.1f}", anchor="e")
+        canvas.create_text(left - 6, bottom, text="0", anchor="e")
+        points: list[float] = []
+        for point_index, value in enumerate(values):
+            fraction_x = point_index / max(len(values) - 1, 1)
+            x = left + (right - left) * fraction_x
+            y = bottom - (bottom - top) * value / scale_max
+            points.extend((x, y))
+        if len(points) >= 4:
+            canvas.create_line(*points, fill="#4f46e5", width=2, smooth=True)
+        elif points:
+            canvas.create_oval(
+                points[0] - 3, points[1] - 3, points[0] + 3, points[1] + 3,
+                fill="#4f46e5", outline="",
+            )
+        canvas.create_text(
+            left, bottom + 12, text="Run 1", anchor="w", fill="#64748b"
+        )
+        canvas.create_text(
+            right, bottom + 12, text=f"Run {len(values)}",
+            anchor="e", fill="#64748b",
+        )
+
+
+def _draw_prediction_ranges(
+    canvas: tk.Canvas,
+    statistics: dict[str, dict[str, float]] | None,
+    predictions: dict[str, float] | None = None,
+) -> None:
+    """Draw historical min-to-max bands, averages, and optional predictions."""
+    canvas.delete("all")
+    if not statistics:
+        canvas.create_text(
+            max(canvas.winfo_width(), 500) / 2,
+            max(canvas.winfo_height(), 260) / 2,
+            text="Collect valid runs to see this app's historical range.",
+            fill="#64748b",
+        )
+        return
+
+    width = max(canvas.winfo_width(), 560)
+    height = max(canvas.winfo_height(), 280)
+    cell_width, cell_height = width / 2, height / 2
+    for index, (metric, title, unit) in enumerate(_METRICS):
+        values = statistics[metric]
+        column, row = index % 2, index // 2
+        x0, y0 = column * cell_width, row * cell_height
+        left, right = x0 + 62, x0 + cell_width - 18
+        center_y = y0 + cell_height * 0.58
+        minimum, average, maximum = (
+            values["min"], values["average"], values["max"]
+        )
+        scale_max = max(maximum, float((predictions or {}).get(metric, 0.0)), 1e-9)
+
+        def to_x(value: float) -> float:
+            return left + (right - left) * min(max(value / scale_max, 0.0), 1.0)
+
+        canvas.create_text(
+            x0 + 8, y0 + 14, text=f"{title} ({unit})", anchor="w",
+            font=("Segoe UI", 9, "bold"),
+        )
+        canvas.create_line(left, center_y, right, center_y, fill="#e2e8f0", width=5)
+        canvas.create_line(
+            to_x(minimum), center_y, to_x(maximum), center_y,
+            fill="#a5b4fc", width=8,
+        )
+        canvas.create_oval(
+            to_x(average) - 5, center_y - 5, to_x(average) + 5,
+            center_y + 5, fill="#4f46e5", outline="",
+        )
+        if predictions is not None and metric in predictions:
+            predicted_x = to_x(float(predictions[metric]))
+            canvas.create_line(
+                predicted_x, center_y - 18, predicted_x, center_y + 18,
+                fill="#e11d48", width=2,
+            )
+        canvas.create_text(
+            left, center_y + 20, text=f"Min {minimum:.2f}", anchor="w"
+        )
+        canvas.create_text(
+            (left + right) / 2, center_y + 20,
+            text=f"Avg {average:.2f}", anchor="center",
+        )
+        canvas.create_text(
+            right, center_y + 20, text=f"Max {maximum:.2f}", anchor="e"
+        )
+
+    canvas.create_text(
+        width - 12, height - 8, text="Blue dot: average   Red line: prediction",
+        anchor="se", fill="#64748b",
+    )
+
+
 def _draw_gauge(canvas: tk.Canvas, value: float, maximum: float) -> None:
     """Draw a compact colored horizontal resource gauge."""
     canvas.delete("all")
@@ -229,7 +428,7 @@ class ResourceApp:
         """Create the window and initialize API and UI state."""
         self.root = root
         self.root.title("AI Resource Allocation Engine")
-        self.root.geometry("1000x760")
+        self.root.geometry("1000x900")
         self.root.minsize(820, 640)
         self.api = ApiClient()
         self.api_process: subprocess.Popen[bytes] | None = None
@@ -242,6 +441,9 @@ class ResourceApp:
         self.app_options = self._application_options()
         self.app_names = list(self.app_options)
         self.selected_app = tk.StringVar(value=self.app_names[0] if self.app_names else "")
+        self.current_predictions: dict[str, dict[str, float]] = {}
+        self.current_history: list[dict[str, float]] = []
+        self.current_range: dict[str, dict[str, float]] | None = None
         self.status = tk.StringVar(value="Connecting to local API...")
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self._close)
@@ -292,6 +494,7 @@ class ResourceApp:
             width=24,
         )
         self.app_picker.pack(side="left", padx=(8, 14))
+        self.app_picker.bind("<<ComboboxSelected>>", self._on_app_selected)
         self.browse_button = ttk.Button(
             controls, text="Browse .exe...", command=self._browse_executable
         )
@@ -324,6 +527,28 @@ class ResourceApp:
             gauge = tk.Canvas(card, height=32, highlightthickness=0)
             gauge.pack(fill="x", pady=(2, 0))
             self.gauge_widgets.append((metric, unit, value_label, gauge))
+
+        self.visualization_tabs = ttk.Notebook(outer, height=260)
+        self.visualization_tabs.pack(fill="x", pady=(5, 3))
+        trend_tab = ttk.Frame(self.visualization_tabs, padding=4)
+        self.visualization_tabs.add(trend_tab, text="Run history")
+        self.trend_hint = ttk.Label(trend_tab, text="")
+        self.trend_hint.pack(anchor="w")
+        self.trend_canvas = tk.Canvas(
+            trend_tab, height=220, highlightthickness=0, background="white"
+        )
+        self.trend_canvas.pack(fill="x", expand=True)
+        self.trend_canvas.bind("<Configure>", self._redraw_history)
+
+        range_tab = ttk.Frame(self.visualization_tabs, padding=4)
+        self.visualization_tabs.add(range_tab, text="Prediction range")
+        self.range_hint = ttk.Label(range_tab, text="")
+        self.range_hint.pack(anchor="w")
+        self.range_canvas = tk.Canvas(
+            range_tab, height=220, highlightthickness=0, background="white"
+        )
+        self.range_canvas.pack(fill="x", expand=True)
+        self.range_canvas.bind("<Configure>", self._redraw_range)
 
         self.compare_frame = ttk.LabelFrame(outer, text="Predicted vs actual", padding=6)
         self.chart_grid = ttk.Frame(self.compare_frame)
@@ -380,6 +605,7 @@ class ResourceApp:
         for button in (self.predict_button, self.compare_button, self.prepare_button):
             if not self.app_names:
                 button.configure(state="disabled")
+        self._refresh_visualizations()
 
     def _start_worker(
         self, function: Callable[[], Any], result_kind: str
@@ -432,6 +658,7 @@ class ResourceApp:
         self.app_picker.configure(values=self.app_names, state="readonly")
         self.selected_app.set(label)
         self._set_buttons(True)
+        self._refresh_visualizations()
 
     def _selected_identity(self) -> tuple[str, Path | None] | None:
         """Resolve the visible selection to its identifier and executable path."""
@@ -447,6 +674,51 @@ class ResourceApp:
                 return None
             self.app_options[self.selected_app.get()] = (app_name, executable)
         return app_name, executable
+
+    def _on_app_selected(self, _event: tk.Event[tk.Misc]) -> None:
+        """Refresh historical charts after changing the selected application."""
+        self._refresh_visualizations()
+
+    def _refresh_visualizations(self) -> None:
+        """Load the selected app's recent runs and historical profile range."""
+        selection = self._selected_identity()
+        if selection is None:
+            self.current_history = []
+            self.current_range = None
+            self.trend_hint.configure(text="Select an application to view its history.")
+            self.range_hint.configure(text="")
+            self._redraw_history()
+            self._redraw_range()
+            return
+        app_name, _ = selection
+        self.current_history = _load_app_history(app_name)
+        self.current_range = _load_profile_statistics(app_name) or _history_statistics(
+            self.current_history
+        )
+        if self.current_history:
+            self.trend_hint.configure(
+                text=f"Latest {len(self.current_history)} valid runs"
+            )
+        else:
+            self.trend_hint.configure(text="No valid run history recorded yet.")
+        if self.current_range:
+            self.range_hint.configure(
+                text="Range and average from the app's recent collected profile"
+            )
+        else:
+            self.range_hint.configure(text="No profile range available yet.")
+        self._redraw_history()
+        self._redraw_range()
+
+    def _redraw_history(self, _event: tk.Event[tk.Misc] | None = None) -> None:
+        """Redraw the history chart at the canvas's current size."""
+        _draw_history_trends(self.trend_canvas, self.current_history)
+
+    def _redraw_range(self, _event: tk.Event[tk.Misc] | None = None) -> None:
+        """Redraw the historical-range chart and selected prediction marker."""
+        app_name = self.app_options.get(self.selected_app.get(), ("", None))[0]
+        predictions = self.current_predictions.get(app_name)
+        _draw_prediction_ranges(self.range_canvas, self.current_range, predictions)
 
     def _ensure_api(self) -> dict[str, Any]:
         """Connect to the API or start a local server and wait until ready."""
@@ -615,6 +887,10 @@ class ResourceApp:
             value = float(predicted[metric])
             label.configure(text=f"{metric.replace('_', ' ').title()}: {value:.2f} {unit}")
             _draw_gauge(canvas, value, self.scales[metric])
+        self.current_predictions[result["app_name"]] = {
+            metric: float(predicted[metric]) for metric, _, _ in _METRICS
+        }
+        self._redraw_range()
         self.compare_frame.pack_forget()
         self.detail_label.configure(text="")
 
@@ -627,6 +903,10 @@ class ResourceApp:
             value = float(predicted[metric])
             label.configure(text=f"Predicted {metric.replace('_', ' ')}: {value:.2f} {unit}")
             _draw_gauge(gauge, value, self.scales[metric])
+        self.current_predictions[result["app_name"]] = {
+            metric: float(predicted[metric]) for metric, _, _ in _METRICS
+        }
+        self._redraw_range()
         for index, (metric, title, unit) in enumerate(_METRICS):
             predicted_value = float(predicted[metric])
             actual_value = float(actual[metric])
@@ -722,6 +1002,7 @@ class ResourceApp:
                 self.status.set("Run complete.")
             elif kind == "pipeline_done":
                 self.status.set(payload)
+                self._refresh_visualizations()
                 messagebox.showinfo("Model ready", payload)
             elif kind == "status":
                 self.status.set(payload)

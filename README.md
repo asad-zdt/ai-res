@@ -104,7 +104,7 @@ Normal-priority changes and Job Objects for processes spawned by this applicatio
 
 ## Desktop GUI
 
-The Tkinter GUI is launched with `.\tasks.ps1 gui`. It provides an installed/configured-app selector, an executable browser, prediction gauges, predicted-versus-actual charts, an error summary, enforcement details, and recent comparison history. Installed-app discovery uses Windows application registry entries; some apps may only be available through **Browse .exe...**. Selected executable paths are stored in the ignored local file `data/user_apps.yaml`. The API starts automatically when needed. Its base URL can be overridden with `API_URL`; the default is `http://127.0.0.1:8000`.
+The Tkinter GUI is launched with `.\tasks.ps1 gui`. It provides an installed/configured-app selector, an executable browser, prediction gauges, historical per-run trends, a min/average/max prediction-range view, predicted-versus-actual charts, an error summary, enforcement details, and recent comparison history. Installed-app discovery uses Windows application registry entries; some apps may only be available through **Browse .exe...**. Selected executable paths are stored in the ignored local file `data/user_apps.yaml`. The API starts automatically when needed. Its base URL can be overridden with `API_URL`; the default is `http://127.0.0.1:8000`.
 
 ## Tests
 
