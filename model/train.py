@@ -45,7 +45,7 @@ def load_dataset(data_path: Path) -> pd.DataFrame:
 
 
 def build_pipeline() -> Pipeline:
-    """Create the shared preprocessing pipeline with a tuned random forest model."""
+   
     preprocessing = ColumnTransformer(
         transformers=[
             (

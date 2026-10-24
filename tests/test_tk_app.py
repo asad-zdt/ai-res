@@ -13,6 +13,7 @@ from gui.tk_app import (
     _load_profile_statistics,
     _metric_scales,
 )
+from gui.theme import tokens
 
 
 def test_error_percent_handles_zero_actual_value() -> None:
@@ -143,6 +144,6 @@ def test_new_charts_draw_history_and_prediction_range() -> None:
         for op in history_canvas.operations
     )
     assert any(
-        op[0] == "line" and op[2].get("fill") == "#e11d48"
+        op[0] == "line" and op[2].get("fill") == tokens.LIGHT["prediction"]
         for op in range_canvas.operations
     )

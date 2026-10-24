@@ -4,5 +4,6 @@ __pycache__/
 .pytest_cache/
 data/raw/*.csv
 data/user_apps.yaml
+data/gui_preferences.json
 model/artifacts/*.pkl
 .env

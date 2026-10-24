@@ -1,0 +1,1 @@
+"""Main desktop application views."""

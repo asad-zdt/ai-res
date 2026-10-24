@@ -17,10 +17,10 @@ flowchart LR
     API --> Admission[Admission control]
     Admission --> Jobs[Windows Job Objects]
     Admission --> Priority[Windows priority class]
-    GUI[Streamlit GUI] --> API
+    GUI[Tkinter desktop GUI] --> API
 ```
 
-The collector runs the workloads listed in `collector/apps_config.yaml` and records process-tree resource measurements. The feature builder uses prior valid runs as historical features, then writes the training dataset and serving profiles; the trainer saves its model bundle to `model/artifacts/model.pkl`. FastAPI uses the model when the bundle exists (or the deterministic mock predictor otherwise), and the Streamlit GUI calls the API.
+The collector runs the workloads listed in `collector/apps_config.yaml` and records process-tree resource measurements. The feature builder uses prior valid runs as historical features, then writes the training dataset and serving profiles; the trainer saves its model bundle to `model/artifacts/model.pkl`. FastAPI uses the model when the bundle exists (or the deterministic mock predictor otherwise), and the Tkinter desktop GUI calls the API.
 
 The diagram shows the current Windows integration. The project plan in `vibe.md` describes a Linux cgroups v2 counterpart (`cpu.max`, `memory.max`, and `cgroup.procs`), but that is a design reference, not a supported or implemented runtime here.
 
@@ -104,7 +104,11 @@ Normal-priority changes and Job Objects for processes spawned by this applicatio
 
 ## Desktop GUI
 
-The Tkinter GUI is launched with `.\tasks.ps1 gui`. It provides an installed/configured-app selector, an executable browser, prediction gauges, historical per-run trends, a min/average/max prediction-range view, predicted-versus-actual charts, an error summary, enforcement details, and recent comparison history. Installed-app discovery uses Windows application registry entries; some apps may only be available through **Browse .exe...**. Selected executable paths are stored in the ignored local file `data/user_apps.yaml`. The API starts automatically when needed. Its base URL can be overridden with `API_URL`; the default is `http://127.0.0.1:8000`.
+The Tkinter GUI is launched with `.\tasks.ps1 gui`. It provides a searchable, grouped selector for configured workloads, previously chosen executables, and discoverable installed applications; **Browse .exe…** adds another executable. Selected paths are stored in the ignored local file `data/user_apps.yaml`.
+
+The Material-inspired dashboard has Overview, Run History, Prediction Range, Comparison, and Settings / About pages. It uses the system's Google Sans font when installed, otherwise Roboto or Segoe UI, and enables Windows per-monitor DPI awareness before creating the window. Use the app-bar theme button to switch light/dark mode; the preference is saved locally in ignored `data/gui_preferences.json`. The local API starts automatically when needed and is stopped on close only if the GUI started it. Its base URL can be overridden with `API_URL`; the default is `http://127.0.0.1:8000`.
+
+**Demo walkthrough:** select `sort_big`, open **Run History** to show its latest valid measurements, and open **Prediction Range** to explain the historical minimum/average/maximum and red prediction marker. Return to Overview and choose **Predict** to show resource estimates. Choose **Run & compare** to run the workload; then explain the paired predicted/actual bars, absolute and percentage error table, and enforcement status returned by the API. The status line identifies whether Job Object caps were reported active or unavailable. Run-history and profile charts use collected values only; without valid samples they show an explicit empty state. For an application-specific profile, **Prepare app** warns before launching it without arguments for up to 15 seconds per collection attempt.
 
 ## Tests
 
@@ -133,7 +137,7 @@ The suite includes unit tests for schemas, feature leakage, monitoring, admissio
 |   `-- processed/              Training dataset and serving profiles (generated)
 |-- docs/                       API and feature/target contract
 |-- features/                   Leakage-safe feature and profile builder
-|-- gui/                        Tkinter desktop app and API client
+|-- gui/                        Material-inspired Tkinter app, views, widgets, theme, and API client
 |-- model/                      Training, evaluation, and prediction code
 |   `-- artifacts/              Serialized trained model bundle (generated)
 |-- os_integration/             Admission policy, Windows Job Objects, and priority handling
